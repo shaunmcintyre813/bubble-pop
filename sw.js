@@ -1,11 +1,12 @@
 const BASE_URL = new URL('./', self.location.href);
 const CACHE_PREFIX = `bubble-pop-${encodeURIComponent(BASE_URL.pathname)}-`;
-const CACHE_NAME = `${CACHE_PREFIX}v6`;
+const CACHE_NAME = `${CACHE_PREFIX}v7`;
 const PAGE_URL = new URL('./index.html', BASE_URL).href;
 const ASSET_PATHS = ['./', './index.html', './styles.css', './game.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 const ASSETS = ASSET_PATHS.map(path => new URL(path, BASE_URL).href);
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // Fetch fresh assets for a new release instead of copying the browser's old HTTP cache.
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', event => {
   event.waitUntil(Promise.all([caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k)))), self.clients.claim()]));
