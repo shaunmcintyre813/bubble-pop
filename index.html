@@ -22,10 +22,18 @@
       <h1>Bubble Pop</h1>
       <p>Touch the bubbles!</p>
       <button id="start" type="button">Tap to Play</button>
+    </div>
+  </div>
+  <div id="parent-panel" class="welcome parent-panel" hidden>
+    <div class="welcome-card">
+      <h1>Grown-ups</h1>
+      <p>Play settings</p>
       <div class="parent-options">
         <label class="parent-option"><input id="simple-effects" type="checkbox"> Simpler pop effects</label>
         <label class="parent-option"><input id="quiet-sounds" type="checkbox"> Quiet sounds</label>
       </div>
+      <button id="resume" type="button">Back to Play</button>
+      <p class="parent-hint">Hold a top corner for 1 second to open settings.</p>
     </div>
   </div>
   <script src="./game.js" defer></script>

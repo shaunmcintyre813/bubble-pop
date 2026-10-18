@@ -3,7 +3,9 @@
   const canvas = document.querySelector('#game');
   const ctx = canvas.getContext('2d', { alpha: false });
   const welcome = document.querySelector('#welcome');
+  const parentPanel = document.querySelector('#parent-panel');
   const startButton = document.querySelector('#start');
+  const resumeButton = document.querySelector('#resume');
   const simpleEffectsInput = document.querySelector('#simple-effects');
   const quietSoundsInput = document.querySelector('#quiet-sounds');
   const safeProbe = document.querySelector('#safe-probe');
@@ -16,7 +18,9 @@
   let spawnTimers = new Set();
   const activePointers = new Map();
   let soundOutput = null;
-  let lastSound = -Infinity;
+  let settingsOpen = false;
+  const parentPresses = new Map();
+  const pentatonic = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51, 1567.98, 1760];
   const backdrop = document.createElement('canvas');
 
   const rand = (min, max) => min + Math.random() * (max - min);
@@ -80,28 +84,23 @@
     spawnTimers.add(timer);
   }
 
-  function sound(hue) {
+  function sound() {
     if (!audio || quietSoundsInput.checked) return;
     try {
       if (audio.state === 'suspended') audio.resume().catch(() => {});
       const now = audio.currentTime;
-      // A swipe can pop several bubbles together; keep the sound soft and distinct.
-      if (now - lastSound < .045) return;
-      lastSound = now;
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
-      const pitch = 690 + (hue % 55) + rand(-18, 18);
+      // Every pop uses a note from the same major pentatonic scale.
+      const pitch = pentatonic[popCount % pentatonic.length];
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(pitch, now);
-      oscillator.frequency.exponentialRampToValueAtTime(pitch * .48, now + .035);
-      oscillator.frequency.exponentialRampToValueAtTime(pitch * .29, now + .15);
       gain.gain.setValueAtTime(.0001, now);
-      gain.gain.exponentialRampToValueAtTime(.09, now + .004);
-      gain.gain.exponentialRampToValueAtTime(.025, now + .04);
-      gain.gain.exponentialRampToValueAtTime(.0001, now + .16);
+      gain.gain.exponentialRampToValueAtTime(.055, now + .004);
+      gain.gain.exponentialRampToValueAtTime(.0001, now + .13);
       oscillator.connect(gain).connect(soundOutput || audio.destination);
       oscillator.start(now);
-      oscillator.stop(now + .17);
+      oscillator.stop(now + .14);
       oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     } catch (_) { /* Gameplay works without audio if the device blocks it. */ }
   }
@@ -120,8 +119,8 @@
     effects.push({ type: 'pop', x: b.x, y: b.y, r: b.r, hue: b.hue, age: 0,
       particles: simpleEffects ? [] : Array.from({ length: 5 }, (_, i) => ({ angle: i * Math.PI * 2 / 5 + rand(-.2, .2), distance: rand(.85, 1.05), size: rand(1.8, 3.2) })) });
     if (effects.length > 24) effects.shift();
-    sound(b.hue);
     popCount++;
+    sound();
     if (bubbles.length < Math.min(4, targetCount())) addBubble();
     queueReplacement(popCount % 6 < 2);
     return true;
@@ -231,7 +230,7 @@
     const dt = Math.min((timestamp - (lastFrame || timestamp)) / 1000, .05);
     lastFrame = timestamp;
     drawBackground();
-    if (started) {
+    if (started && !settingsOpen) {
       for (const b of bubbles) {
         b.age += dt;
         // Slowly steer each bubble through its own drifting current.
@@ -265,23 +264,38 @@
     if (started) return;
     simpleEffects = simpleEffectsInput.checked;
     started = true;
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass && !quietSoundsInput.checked) {
-      try { audio = new AudioContextClass(); audio.resume().catch(() => {}); } catch (_) { audio = null; }
-      if (audio?.createDynamicsCompressor) {
-        soundOutput = audio.createDynamicsCompressor();
-        soundOutput.threshold.value = -22;
-        soundOutput.knee.value = 12;
-        soundOutput.ratio.value = 8;
-        soundOutput.attack.value = .004;
-        soundOutput.release.value = .18;
-        soundOutput.connect(audio.destination);
-      }
-    }
+    ensureAudio();
     fillBubbles();
     welcome.classList.add('hidden');
     setTimeout(() => { welcome.hidden = true; }, 230);
   }
+
+  function ensureAudio() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass || quietSoundsInput.checked || audio) return;
+    try { audio = new AudioContextClass(); audio.resume().catch(() => {}); } catch (_) { audio = null; }
+    if (audio?.createDynamicsCompressor) {
+      soundOutput = audio.createDynamicsCompressor();
+      soundOutput.threshold.value = -22;
+      soundOutput.knee.value = 12;
+      soundOutput.ratio.value = 8;
+      soundOutput.attack.value = .004;
+      soundOutput.release.value = .18;
+      soundOutput.connect(audio.destination);
+    }
+  }
+
+  function openParentSettings() {
+    if (!started || settingsOpen) return;
+    settingsOpen = true;
+    parentPanel.hidden = false;
+  }
+  function closeParentSettings() {
+    settingsOpen = false;
+    parentPanel.hidden = true;
+    lastFrame = 0;
+  }
+  resumeButton.addEventListener('click', closeParentSettings);
 
   startButton.addEventListener('pointerdown', begin, { passive: true });
   startButton.addEventListener('click', begin);
@@ -289,16 +303,38 @@
     try { input.checked = window.localStorage.getItem(key) === '1'; } catch (_) {}
     input.addEventListener('change', () => {
       try { window.localStorage.setItem(key, input.checked ? '1' : '0'); } catch (_) {}
+      if (input === simpleEffectsInput) simpleEffects = input.checked;
+      if (input === quietSoundsInput && !input.checked && started) ensureAudio();
     });
   }
   canvas.addEventListener('pointerdown', event => {
     if (!started) return;
     event.preventDefault();
+    if (event.clientX < 56 && event.clientY < 56 || event.clientX > width - 56 && event.clientY < 56) {
+      const timer = setTimeout(() => { parentPresses.delete(event.pointerId); openParentSettings(); }, 1000);
+      parentPresses.set(event.pointerId, { x: event.clientX, y: event.clientY, timer });
+      try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
+      return;
+    }
     activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
     tapAt(event.clientX, event.clientY);
   });
   canvas.addEventListener('pointermove', event => {
+    const parentPress = parentPresses.get(event.pointerId);
+    if (parentPress) {
+      if (Math.hypot(event.clientX - parentPress.x, event.clientY - parentPress.y) > 18) {
+        clearTimeout(parentPress.timer);
+        parentPresses.delete(event.pointerId);
+        if (!settingsOpen) {
+          tapAt(parentPress.x, parentPress.y);
+          const dx = event.clientX - parentPress.x, dy = event.clientY - parentPress.y;
+          const steps = Math.ceil(Math.hypot(dx, dy) / 14);
+          for (let i = 1; i <= steps; i++) popAt(parentPress.x + dx * i / steps, parentPress.y + dy * i / steps);
+          activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        }
+      } else return;
+    }
     const previous = activePointers.get(event.pointerId);
     if (!started || !previous) return;
     event.preventDefault();
@@ -308,7 +344,11 @@
     activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   });
   for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-    canvas.addEventListener(name, event => activePointers.delete(event.pointerId));
+    canvas.addEventListener(name, event => {
+      const parentPress = parentPresses.get(event.pointerId);
+      if (parentPress) { clearTimeout(parentPress.timer); parentPresses.delete(event.pointerId); }
+      activePointers.delete(event.pointerId);
+    });
   }
   document.addEventListener('contextmenu', event => event.preventDefault());
   document.addEventListener('touchmove', event => event.preventDefault(), { passive: false });
@@ -330,7 +370,7 @@
   if (new URLSearchParams(location.search).has('test')) {
     window.__bubblePopTest = { snapshot: () => ({ started, width, height, safe, target: targetCount(),
       bubbles: bubbles.map(({ id, x, y, r, vx, vy }) => ({ id, x, y, r, vx, vy })), effects: effects.length,
-      audioState: audio?.state || 'none', pending: spawnTimers.size,
+      audioState: audio?.state || 'none', settingsOpen, pending: spawnTimers.size,
       simpleEffects, popCount, effectTypes: effects.map(e => e.type) }), popAt, tapAt, addBubble };
   }
 })();

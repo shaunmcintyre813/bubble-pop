@@ -16,6 +16,8 @@ Open http://localhost:8000/bubble-pop/. The server also serves the game at `/`, 
 
 For a phone on the same Wi-Fi, start the server with `node dev-server.mjs --host 0.0.0.0` and open the phone URL printed by the server. This tests touch play; service workers and installable PWA behavior need a secure context, so use `localhost` or the HTTPS GitHub Pages site for offline and install checks. Keep the server bound to `127.0.0.1` for ordinary desktop work.
 
+For focused play on a phone, caregivers can use the built-in app-pinning feature: **Guided Access** on iPhone/iPad (Settings → Accessibility → Guided Access) or **App pinning** on Android (Settings → Security/Privacy → App pinning; wording varies by device). These are device controls and are separate from Bubble Pop's caregiver settings, which open by holding either top corner of the play area for one second.
+
 Run the project-path checks with:
 
 ```sh
