@@ -1,6 +1,6 @@
 const BASE_URL = new URL('./', self.location.href);
 const CACHE_PREFIX = `bubble-pop-${encodeURIComponent(BASE_URL.pathname)}-`;
-const CACHE_NAME = `${CACHE_PREFIX}v5`;
+const CACHE_NAME = `${CACHE_PREFIX}v6`;
 const PAGE_URL = new URL('./index.html', BASE_URL).href;
 const ASSET_PATHS = ['./', './index.html', './styles.css', './game.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 const ASSETS = ASSET_PATHS.map(path => new URL(path, BASE_URL).href);

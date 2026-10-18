@@ -16,6 +16,8 @@
   let spawnTimers = new Set();
   const activePointers = new Map();
   let soundOutput = null;
+  let lastSound = -Infinity;
+  const backdrop = document.createElement('canvas');
 
   const rand = (min, max) => min + Math.random() * (max - min);
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
@@ -41,6 +43,7 @@
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    paintBackdrop();
     const cs = getComputedStyle(safeProbe);
     safe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0,
       bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
@@ -82,18 +85,24 @@
     try {
       if (audio.state === 'suspended') audio.resume().catch(() => {});
       const now = audio.currentTime;
+      // A swipe can pop several bubbles together; keep the sound soft and distinct.
+      if (now - lastSound < .045) return;
+      lastSound = now;
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
-      const pitch = 580 + (hue % 85) + rand(-35, 35);
+      const pitch = 690 + (hue % 55) + rand(-18, 18);
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(pitch, now);
-      oscillator.frequency.exponentialRampToValueAtTime(pitch * .48, now + .105);
+      oscillator.frequency.exponentialRampToValueAtTime(pitch * .48, now + .035);
+      oscillator.frequency.exponentialRampToValueAtTime(pitch * .29, now + .15);
       gain.gain.setValueAtTime(.0001, now);
-      gain.gain.exponentialRampToValueAtTime(.105, now + .008);
-      gain.gain.exponentialRampToValueAtTime(.0001, now + .135);
+      gain.gain.exponentialRampToValueAtTime(.09, now + .004);
+      gain.gain.exponentialRampToValueAtTime(.025, now + .04);
+      gain.gain.exponentialRampToValueAtTime(.0001, now + .16);
       oscillator.connect(gain).connect(soundOutput || audio.destination);
       oscillator.start(now);
-      oscillator.stop(now + .14);
+      oscillator.stop(now + .17);
+      oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     } catch (_) { /* Gameplay works without audio if the device blocks it. */ }
   }
 
@@ -109,7 +118,7 @@
     if (nearest < 0) return false;
     const [b] = bubbles.splice(nearest, 1);
     effects.push({ type: 'pop', x: b.x, y: b.y, r: b.r, hue: b.hue, age: 0,
-      particles: simpleEffects ? [] : Array.from({ length: 7 }, () => ({ angle: rand(0, Math.PI * 2), distance: rand(.65, 1.1), size: rand(2, 4.4) })) });
+      particles: simpleEffects ? [] : Array.from({ length: 5 }, (_, i) => ({ angle: i * Math.PI * 2 / 5 + rand(-.2, .2), distance: rand(.85, 1.05), size: rand(1.8, 3.2) })) });
     if (effects.length > 24) effects.shift();
     sound(b.hue);
     popCount++;
@@ -124,39 +133,54 @@
     if (effects.length > 24) effects.shift();
   }
 
+  function paintBackdrop() {
+    // Stationary light is rendered only on resize, keeping phone frames inexpensive.
+    backdrop.width = Math.ceil(width); backdrop.height = Math.ceil(height);
+    const brush = backdrop.getContext('2d');
+    const g = brush.createLinearGradient(0, 0, width * .4, height);
+    g.addColorStop(0, '#304b68');
+    g.addColorStop(.5, '#233b58');
+    g.addColorStop(1, '#15283f');
+    brush.fillStyle = g; brush.fillRect(0, 0, width, height);
+    for (const [x, y, color] of [[.18, .16, '113, 184, 199'], [.86, .65, '129, 126, 185']]) {
+      const glow = brush.createRadialGradient(width * x, height * y, 0, width * x, height * y, Math.max(width, height) * .65);
+      glow.addColorStop(0, `rgba(${color}, .16)`); glow.addColorStop(1, `rgba(${color}, 0)`);
+      brush.fillStyle = glow; brush.fillRect(0, 0, width, height);
+    }
+  }
+
   function drawBackground() {
-    const g = ctx.createLinearGradient(0, 0, width, height);
-    g.addColorStop(0, '#263a54');
-    g.addColorStop(.55, '#1b2e47');
-    g.addColorStop(1, '#15243c');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, width, height);
-    const bloom = ctx.createRadialGradient(width * .66, height * .3, 5, width * .66, height * .3, Math.max(width, height) * .75);
-    bloom.addColorStop(0, '#52618430'); bloom.addColorStop(1, '#52618400');
-    ctx.fillStyle = bloom; ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(backdrop, 0, 0, width, height);
   }
 
   function drawBubble(b) {
     const { x, y, r, hue } = b;
     ctx.save();
-    ctx.shadowColor = `hsla(${hue}, 85%, 75%, .22)`;
-    ctx.shadowBlur = 17;
-    const fill = ctx.createRadialGradient(x - r * .37, y - r * .43, r * .06, x + r * .17, y + r * .18, r * 1.13);
-    fill.addColorStop(0, `hsla(${hue}, 100%, 92%, .42)`);
-    fill.addColorStop(.33, `hsla(${hue}, 83%, 70%, .12)`);
-    fill.addColorStop(.72, `hsla(${hue + 26}, 88%, 68%, .17)`);
-    fill.addColorStop(1, `hsla(${hue - 23}, 95%, 71%, .59)`);
+    const fill = ctx.createRadialGradient(x - r * .14, y - r * .18, r * .12, x, y, r);
+    fill.addColorStop(0, `hsla(${hue}, 90%, 90%, .025)`);
+    fill.addColorStop(.65, `hsla(${hue}, 85%, 80%, .06)`);
+    fill.addColorStop(.88, `hsla(${hue + 25}, 90%, 80%, .17)`);
+    fill.addColorStop(1, `hsla(${hue - 20}, 95%, 83%, .45)`);
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = fill; ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.lineWidth = Math.max(1.6, r * .032);
-    ctx.strokeStyle = `hsla(${hue}, 95%, 92%, .73)`; ctx.stroke();
-    ctx.beginPath(); ctx.arc(x - r * .03, y - r * .04, r * .78, 3.83, 5.29);
-    ctx.lineWidth = Math.max(3, r * .105); ctx.lineCap = 'round'; ctx.strokeStyle = '#ffffffa8'; ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(x - r * .33, y - r * .52, r * .19, r * .083, -.53, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffffc0'; ctx.fill();
-    ctx.beginPath(); ctx.arc(x + r * .36, y + r * .42, r * .12, 0, Math.PI * 2);
-    ctx.fillStyle = `hsla(${hue + 45}, 90%, 85%, .35)`; ctx.fill();
+    const rim = ctx.createLinearGradient(x - r, y - r, x + r, y + r);
+    rim.addColorStop(0, '#e9ffffe8');
+    rim.addColorStop(.28, `hsla(${hue}, 95%, 84%, .85)`);
+    rim.addColorStop(.5, '#d6c5ff70');
+    rim.addColorStop(.72, '#ffcae3bd');
+    rim.addColorStop(1, '#aefff1d9');
+    ctx.lineWidth = Math.max(1.4, r * .027);
+    ctx.strokeStyle = rim; ctx.stroke();
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(x, y, r * .88, 3.65, 5.05);
+    ctx.lineWidth = r * .065; ctx.strokeStyle = '#ffffff25'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, r * .86, 3.95, 4.75);
+    ctx.lineWidth = r * .037; ctx.strokeStyle = '#ffffffcf'; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x - r * .54, y - r * .56, r * .095, r * .044, -.7, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffffe0'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r * .9, .55, 1.65);
+    ctx.lineWidth = r * .045; ctx.strokeStyle = `hsla(${hue + 65}, 95%, 85%, .42)`; ctx.stroke();
     ctx.restore();
   }
 
@@ -173,9 +197,9 @@
     const t = e.age / .38;
     const alpha = Math.max(0, 1 - t);
     ctx.save();
-    ctx.strokeStyle = `hsla(${e.hue}, 95%, 88%, ${alpha * .75})`;
-    ctx.lineWidth = 2.8 * (1 - t) + .5;
-    ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (.43 + t * .85), 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = `hsla(${e.hue}, 95%, 88%, ${alpha * alpha * (simpleEffects ? .35 : .6)})`;
+    ctx.lineWidth = 1.4 * (1 - t) + .5;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (1 - .26 * Math.min(t / .22, 1) + .28 * t), 0, Math.PI * 2); ctx.stroke();
     for (const p of e.particles) {
       const d = e.r * (.75 + t * .67) * p.distance;
       ctx.beginPath(); ctx.arc(e.x + Math.cos(p.angle) * d, e.y + Math.sin(p.angle) * d, p.size * (1 - t * .55), 0, Math.PI * 2);
