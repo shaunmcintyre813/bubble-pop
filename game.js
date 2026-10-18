@@ -5,6 +5,7 @@
   const welcome = document.querySelector('#welcome');
   const startButton = document.querySelector('#start');
   const simpleEffectsInput = document.querySelector('#simple-effects');
+  const quietSoundsInput = document.querySelector('#quiet-sounds');
   const safeProbe = document.querySelector('#safe-probe');
   const palette = [188, 205, 267, 310, 35, 155, 285];
   const bubbles = [];
@@ -34,8 +35,8 @@
   };
 
   function resize() {
-    width = window.innerWidth;
-    height = window.innerHeight;
+    width = window.visualViewport?.width ?? window.innerWidth;
+    height = window.visualViewport?.height ?? window.innerHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
@@ -77,7 +78,7 @@
   }
 
   function sound(hue) {
-    if (!audio) return;
+    if (!audio || quietSoundsInput.checked) return;
     try {
       if (audio.state === 'suspended') audio.resume().catch(() => {});
       const now = audio.currentTime;
@@ -101,7 +102,7 @@
     for (let i = 0; i < bubbles.length; i++) {
       const b = bubbles[i];
       const distance = Math.hypot(x - b.x, y - b.y);
-      if (distance <= b.r + clamp(b.r * .32, 14, 24) && distance < best) {
+      if (distance <= b.r + clamp(b.r * .42, 20, 32) && distance < best) {
         nearest = i; best = distance;
       }
     }
@@ -241,7 +242,7 @@
     simpleEffects = simpleEffectsInput.checked;
     started = true;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass) {
+    if (AudioContextClass && !quietSoundsInput.checked) {
       try { audio = new AudioContextClass(); audio.resume().catch(() => {}); } catch (_) { audio = null; }
       if (audio?.createDynamicsCompressor) {
         soundOutput = audio.createDynamicsCompressor();
@@ -256,17 +257,16 @@
     fillBubbles();
     welcome.classList.add('hidden');
     setTimeout(() => { welcome.hidden = true; }, 230);
-    if (document.documentElement.requestFullscreen) {
-      try { document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {}); } catch (_) { /* May be unsupported or denied. */ }
-    }
   }
 
   startButton.addEventListener('pointerdown', begin, { passive: true });
   startButton.addEventListener('click', begin);
-  try { simpleEffectsInput.checked = window.localStorage.getItem('bubble-pop-simple-effects') === '1'; } catch (_) {}
-  simpleEffectsInput.addEventListener('change', () => {
-    try { window.localStorage.setItem('bubble-pop-simple-effects', simpleEffectsInput.checked ? '1' : '0'); } catch (_) {}
-  });
+  for (const [input, key] of [[simpleEffectsInput, 'bubble-pop-simple-effects'], [quietSoundsInput, 'bubble-pop-quiet-sounds']]) {
+    try { input.checked = window.localStorage.getItem(key) === '1'; } catch (_) {}
+    input.addEventListener('change', () => {
+      try { window.localStorage.setItem(key, input.checked ? '1' : '0'); } catch (_) {}
+    });
+  }
   canvas.addEventListener('pointerdown', event => {
     if (!started) return;
     event.preventDefault();
@@ -290,11 +290,12 @@
   document.addEventListener('touchmove', event => event.preventDefault(), { passive: false });
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
+  window.visualViewport?.addEventListener('resize', resize);
   document.addEventListener('visibilitychange', () => { lastFrame = 0; });
   resize();
   requestAnimationFrame(frame);
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').then(registration => {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { scope: './' }).then(registration => {
       const checkForUpdate = () => {
         if (document.visibilityState === 'visible' && navigator.onLine) registration.update().catch(() => {});
       };
