@@ -4,6 +4,8 @@ A small, offline-capable bubble popping game for toddlers. No ads, tracking, acc
 
 **Play:** https://shaunmcintyre813.github.io/bubble-pop/
 
+Bubbles arrive in gentle puffs from alternating sides, with small, medium, and occasional large bubbles. Some puffs include a loose cluster that slowly separates. Each puff settles into a drifting breeze and leaves the opposite edge; clearing the screen brings the next puff forward. Caregiver settings pause both movement and the blowing rhythm.
+
 ## Run locally
 
 The game has no build step, package install, or external runtime dependencies. Node.js 20 or newer is enough to run the local server and the path checks.
