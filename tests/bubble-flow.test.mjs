@@ -54,40 +54,48 @@ function game(width = 390, height = 844, seed = 7) {
     resize(w, h) { window.visualViewport.width = w; window.visualViewport.height = h; window.emit('resize'); } };
 }
 
-test('idle play keeps bringing varied bubbles from edges without overcrowding', () => {
+test('idle play fills once with gentle edge puffs and keeps every bubble available', () => {
   for (const [width, height] of [[320, 568], [390, 844], [844, 390], [1440, 900]]) {
     const g = game(width, height);
     const seen = new Set();
     const sizes = [], directions = new Set();
-    let clusterSeen = false, previous = g.snapshot(), emptyFor = 0, longestEmpty = 0;
+    let previous = g.snapshot(), emptyFor = 0, longestEmpty = 0;
+    const speedLimit = Math.min(Math.max(width * .065, 25), 45) + 5.5;
     for (let frame = 0; frame < 60 * 90; frame++) {
       const state = g.step();
       assert.ok(state.bubbles.length <= state.target);
       const visible = state.bubbles.filter(b => b.x + b.r > 0 && b.x - b.r < width);
       emptyFor = visible.length ? 0 : emptyFor + 1 / 60;
       longestEmpty = Math.max(longestEmpty, emptyFor);
+      const currentIds = new Set(state.bubbles.map(b => b.id));
+      for (const old of previous.bubbles) assert.ok(currentIds.has(old.id), `bubble ${old.id} left without being popped`);
       for (const b of state.bubbles) {
         assert.ok(Number.isFinite(b.x) && Number.isFinite(b.y));
         assert.ok(b.y >= b.r && b.y <= height - b.r);
+        assert.ok(Math.abs(b.vx) <= speedLimit, `horizontal speed ${Math.abs(b.vx).toFixed(1)} exceeded ${speedLimit} at ${width}x${height}`);
         if (!seen.has(b.id)) {
-          assert.ok(b.x < 0 || b.x > width, 'new bubbles must enter through an edge');
+          assert.ok(b.x < width * .25 || b.x > width * .75, 'new bubbles must enter near an edge');
           seen.add(b.id); sizes.push(b.r); directions.add(b.direction);
-        }
-        clusterSeen ||= b.cluster !== null;
-      }
-      // Disappearances during idle play must happen at the destination edge.
-      for (const old of previous.bubbles) {
-        if (!state.bubbles.some(b => b.id === old.id)) {
-          assert.ok(old.direction === 1 ? old.x - old.r > width : old.x + old.r < 0);
         }
       }
       previous = state;
     }
-    assert.ok(seen.size > 20, 'the blowing rhythm must continue during idle play');
-    assert.equal(directions.size, 2);
-    assert.ok(Math.max(...sizes) / Math.min(...sizes) > 2);
-    assert.ok(clusterSeen);
+    assert.ok(seen.size >= g.snapshot().target, 'the first puffs should fill the play area');
+    assert.ok(seen.size <= g.snapshot().target + 4, 'idle play should settle instead of continuously replacing bubbles');
+    assert.ok(directions.size >= 1);
+    assert.ok(Math.max(...sizes) / Math.min(...sizes) > 1.1);
     assert.ok(longestEmpty < 1.5, `empty for ${longestEmpty.toFixed(2)} seconds at ${width}x${height}`);
+    assert.equal(g.snapshot().bubbles.length, g.snapshot().target, 'idle play should settle at its target count');
+    if (width === 1440) {
+      const settled = g.snapshot().bubbles;
+      for (let i = 0; i < settled.length; i++) for (let j = i + 1; j < settled.length; j++) {
+        const a = settled[i], b = settled[j];
+        const sameCluster = a.cluster !== null && a.cluster === b.cluster;
+        if (sameCluster && Math.min(a.age, b.age) < 3.5) continue;
+        assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= (a.r + b.r) * .65,
+          `settled bubbles ${a.id} and ${b.id} clumped together`);
+      }
+    }
   }
 });
 

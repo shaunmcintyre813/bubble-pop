@@ -4,7 +4,7 @@ A small, offline-capable bubble popping game for toddlers. No ads, tracking, acc
 
 **Play:** https://shaunmcintyre813.github.io/bubble-pop/
 
-Bubbles arrive in gentle puffs from alternating sides, with small, medium, and occasional large bubbles. Some puffs include a loose cluster that slowly separates. Each puff settles into a drifting breeze and leaves the opposite edge; clearing the screen brings the next puff forward. Caregiver settings pause both movement and the blowing rhythm.
+Bubbles arrive in gentle puffs from alternating sides, with small, medium, and occasional large bubbles. Some puffs include a loose cluster that slowly separates. Each bubble eases into a slow float, spreads away from crowded groups, and stays available until popped. When the play area has room for more, another puff arrives. Caregiver settings pause both movement and the blowing rhythm.
 
 ## Run locally
 

@@ -30,6 +30,7 @@
     top: safe.top + r + 7, bottom: height - safe.bottom - r - 7
   });
   const targetCount = () => clamp(Math.floor(width * height / 44500), 5, 10);
+  const refillThreshold = () => Math.max(2, Math.ceil(targetCount() * .6));
   const bubbleRadius = () => {
     const scale = clamp(Math.min(width, height) / 390, .8, 1.3);
     const choice = Math.random();
@@ -78,15 +79,19 @@
   function releaseGroup(radii) {
     const maxR = Math.max(...radii);
     const pairGap = radii.length > 1 ? (radii[0] + radii[1]) * .89 : 0;
+    const offsets = radii.map((r, i) => ({
+      x: i === 2 ? (radii[0] + r) * .78 : 0,
+      y: i === 0 ? -pairGap / 2 : i === 1 ? pairGap / 2 : 0
+    }));
+    const baseX = puff.direction === 1 ? -maxR * .5 - 5 : width + maxR * .5 + 5;
+    const y = chooseReleaseY(radii, offsets, baseX);
     for (let i = 0; i < radii.length && bubbles.length < targetCount(); i++) {
       const r = radii[i];
-      const offsetX = i === 2 ? (radii[0] + r) * .78 : 0;
-      const offsetY = i === 0 ? -pairGap / 2 : i === 1 ? pairGap / 2 : 0;
-      const x = puff.direction === 1 ? -maxR - 5 - offsetX : width + maxR + 5 + offsetX;
-      const b = { id: ++nextId, x, y: puff.y + offsetY + (radii.length === 1 ? rand(-16, 16) : 0), r,
+      const breeze = clamp(width * .065, 25, 45);
+      const b = { id: ++nextId, x: baseX + offsets[i].x, y: y + offsets[i].y, r,
         hue: palette[Math.floor(rand(0, palette.length))] + rand(-10, 10),
-        direction: puff.direction, breeze: clamp(width * .25, 95, 230), lift: puff.lift,
-        vx: puff.direction * (clamp(width / 18, 20, 70) + clamp(width * .25, 95, 230)), vy: puff.lift,
+        direction: puff.direction, breeze, lift: puff.lift,
+        vx: puff.direction * breeze, vy: puff.lift,
         phase: puff.phase + (radii.length > 1 ? i * .15 : rand(-.7, .7)), age: 0,
         cluster: radii.length > 1 ? puff.id : null };
       keepInReach(b);
@@ -94,18 +99,37 @@
     }
   }
 
+  function chooseReleaseY(radii, offsets, baseX) {
+    if (!bubbles.length) return puff.y;
+    const edge = bounds(Math.max(...radii));
+    const top = Math.min(edge.top, height / 2), bottom = Math.max(edge.bottom, height / 2);
+    let bestY = clamp(puff.y, top, bottom), bestScore = -Infinity;
+    const samples = 32;
+    for (let i = 0; i <= samples; i++) {
+      const y = top + (bottom - top) * i / samples;
+      let score = Infinity;
+      for (let j = 0; j < radii.length; j++) for (const existing of bubbles) {
+        const distance = Math.hypot(baseX + offsets[j].x - existing.x, y + offsets[j].y - existing.y);
+        score = Math.min(score, distance - radii[j] - existing.r);
+      }
+      score -= Math.abs(y - puff.y) * .015;
+      if (score > bestScore) { bestScore = score; bestY = y; }
+    }
+    return bestY;
+  }
+
   function updatePuffs(dt) {
     if (puff) {
       puff.nextIn -= dt;
       if (puff.nextIn <= 0) {
         releaseGroup(puff.groups.shift());
-        if (puff.groups.length && bubbles.length < targetCount()) puff.nextIn = rand(.24, .4);
+        if (puff.groups.length && bubbles.length < targetCount()) puff.nextIn = rand(.55, .7);
         else { puff = null; nextPuffIn = rand(3.2, 5.2); }
       }
       return;
     }
     nextPuffIn -= dt;
-    if (bubbles.length < 2) nextPuffIn = Math.min(nextPuffIn, .22);
+    if (bubbles.length < refillThreshold()) nextPuffIn = Math.min(nextPuffIn, .22);
     if (nextPuffIn <= 0 && bubbles.length < targetCount()) {
       startPuff();
       // The first bubble starts moving immediately, even after a quick screen clear.
@@ -152,7 +176,7 @@
     if (effects.length > 24) effects.shift();
     popCount++;
     sound();
-    if (bubbles.length < 2) nextPuffIn = Math.min(nextPuffIn, .22);
+    if (bubbles.length < refillThreshold()) nextPuffIn = Math.min(nextPuffIn, .22);
     return true;
   }
 
@@ -185,6 +209,7 @@
   function drawBubble(b) {
     const { x, y, r, hue } = b;
     ctx.save();
+    ctx.globalAlpha = clamp(b.age / .65, 0, 1);
     const fill = ctx.createRadialGradient(x - r * .14, y - r * .18, r * .12, x, y, r);
     fill.addColorStop(0, `hsla(${hue}, 90%, 90%, .025)`);
     fill.addColorStop(.65, `hsla(${hue}, 85%, 80%, .06)`);
@@ -269,7 +294,12 @@
         b.age += dt;
         // A shared initial breath eases into a slow current across the play area.
         const breath = Math.exp(-b.age / 2.1);
-        const targetVx = b.direction * (clamp(width / 18, 20, 70) + b.breeze * breath)
+        const horizontalBounds = bounds(b.r);
+        const edgeRange = Math.min(width * .16, Math.max(48, b.r * 1.5));
+        const leftSteer = clamp((horizontalBounds.left + edgeRange - b.x) / edgeRange, 0, 1);
+        const rightSteer = clamp((b.x - (horizontalBounds.right - edgeRange)) / edgeRange, 0, 1);
+        const targetVx = b.direction * (b.breeze * breath)
+          + (leftSteer - rightSteer) * 12 * (1 - breath)
           + Math.sin(b.age * .47 + b.phase) * 5;
         const targetVy = b.lift * breath - 5 + Math.sin(b.age * .38 + b.phase * 1.7) * 6
           + (b.y < height * .16 ? 11 : b.y > height * .84 ? -11 : 0);
@@ -281,10 +311,6 @@
         const edge = bounds(b.r);
         if (b.y < edge.top) { b.y = edge.top; b.vy = Math.max(5, Math.abs(b.vy)); }
         if (b.y > edge.bottom) { b.y = edge.bottom; b.vy = Math.min(-5, -Math.abs(b.vy)); }
-      }
-      for (let i = bubbles.length - 1; i >= 0; i--) {
-        const b = bubbles[i];
-        if (b.direction === 1 ? b.x - b.r > width + 8 : b.x + b.r < -8) bubbles.splice(i, 1);
       }
       separateBubbles(dt);
       for (const b of bubbles) drawBubble(b);
