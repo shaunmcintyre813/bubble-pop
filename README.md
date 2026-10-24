@@ -26,8 +26,9 @@ Run the project-path checks with:
 node --test
 ```
 
-For offline use, open the page online once and allow the service worker to finish caching before disconnecting.
+For a new offline install, keep the page online until the welcome button changes back to **Tap to Play**. It stays disabled while the service worker caches the complete release. If offline setup fails, the welcome text asks you to reconnect and reload; online play remains available.
 
 ## Source and hosting
 
 `index.html`, `styles.css`, and `game.js` make the game. `sw.js`, `manifest.webmanifest`, and `icons/` support offline installation. GitHub Pages publishes the `main` branch from the repository root. The earlier Sites version is also available at https://bubble-pop-shaun.shaun-mcintyre813.chatgpt.site/.
+

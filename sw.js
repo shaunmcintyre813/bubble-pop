@@ -1,15 +1,32 @@
 const BASE_URL = new URL('./', self.location.href);
 const CACHE_PREFIX = `bubble-pop-${encodeURIComponent(BASE_URL.pathname)}-`;
-const CACHE_NAME = `${CACHE_PREFIX}v10`;
+// Change this release suffix whenever the worker or any precached file changes.
+const CACHE_NAME = `${CACHE_PREFIX}v11`;
 const PAGE_URL = new URL('./index.html', BASE_URL).href;
 const ASSET_PATHS = ['./', './index.html', './styles.css', './game.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 const ASSETS = ASSET_PATHS.map(path => new URL(path, BASE_URL).href);
 self.addEventListener('install', event => {
   // Fetch fresh assets for a new release instead of copying the browser's old HTTP cache.
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' })))).then(() => self.skipWaiting()));
+  event.waitUntil((async () => {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' })));
+      const staged = await Promise.all(ASSETS.map(url => cache.match(url)));
+      if (staged.some(response => !response)) throw new Error('Bubble Pop release cache is incomplete.');
+      await self.skipWaiting();
+    } catch (error) {
+      // The versioned candidate is separate from the active release. Discard it on failure.
+      await caches.delete(CACHE_NAME);
+      throw error;
+    }
+  })());
 });
 self.addEventListener('activate', event => {
-  event.waitUntil(Promise.all([caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k)))), self.clients.claim()]));
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k)));
+    await self.clients.claim();
+  })());
 });
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
@@ -26,3 +43,4 @@ self.addEventListener('fetch', event => {
     event.respondWith(caches.open(CACHE_NAME).then(cache => cache.match(event.request, { ignoreSearch: true })).then(hit => hit || fetch(event.request)));
   }
 });
+
