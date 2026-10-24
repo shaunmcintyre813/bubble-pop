@@ -7,7 +7,7 @@ const source = await readFile(new URL('../game.js', import.meta.url), 'utf8');
 
 // Exercise the actual game loop with a deterministic clock and input events.
 // Canvas drawing is stubbed; browser visual checks cover the rendering separately.
-function game(width = 390, height = 844, seed = 7) {
+function game(width = 390, height = 844, seed = 7, options = {}) {
   const events = () => ({
     listeners: new Map(),
     addEventListener(name, handler) {
@@ -21,18 +21,24 @@ function game(width = 390, height = 844, seed = 7) {
   });
   const gradient = { addColorStop() {} };
   const context = new Proxy({}, { get: (_, key) => key.startsWith('create') ? () => gradient : () => {} });
-  const element = () => ({ ...events(), checked: false, hidden: false, classList: { add() {} },
+  const element = () => ({ ...events(), checked: false, hidden: false, disabled: false, textContent: '', classList: { add() {} },
     getContext: () => context, setPointerCapture() {} });
   const elements = Object.fromEntries(['game', 'welcome', 'parent-panel', 'start', 'resume', 'simple-effects',
-    'quiet-sounds', 'safe-probe'].map(id => [id, element()]));
+    'quiet-sounds', 'safe-probe', 'welcome-prompt'].map(id => [id, element()]));
   const document = { ...events(), hidden: false, querySelector: selector => elements[selector.slice(1)], createElement: element };
+  const storage = options.storage || new Map();
   const window = { ...events(), innerWidth: width, innerHeight: height, devicePixelRatio: 1,
-    visualViewport: { ...events(), width, height }, localStorage: { getItem() {}, setItem() {} } };
+    visualViewport: { ...events(), width, height }, localStorage: {
+      getItem(key) { return storage.get(key) ?? null; },
+      setItem(key, value) { storage.set(key, String(value)); }
+    } };
+  const navigator = { onLine: options.online ?? true };
+  if (options.serviceWorker) navigator.serviceWorker = options.serviceWorker;
   const math = Object.create(Math);
   math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2 ** 32; };
   let clock = 100, raf, timerId = 0;
   const timers = new Map();
-  vm.runInNewContext(source, { window, document, navigator: {}, location: { search: '?test', protocol: 'http:' },
+  vm.runInNewContext(source, { window, document, navigator, location: { search: '?test', protocol: 'http:' },
     Math: math, URLSearchParams, getComputedStyle: () => ({}), requestAnimationFrame: callback => { raf = callback; },
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, at: clock + delay }); return timerId; },
     clearTimeout: id => timers.delete(id) });
@@ -50,9 +56,71 @@ function game(width = 390, height = 844, seed = 7) {
   };
   elements.start.emit('click');
   step();
-  return { step, advance, snapshot, tap, elements, document, window,
+  return { step, advance, snapshot, tap, elements, document, window, storage,
     resize(w, h) { window.visualViewport.width = w; window.visualViewport.height = h; window.emit('resize'); } };
 }
+
+test('first launch waits for the complete offline cache before enabling play', async () => {
+  let resolveReady;
+  const ready = new Promise(resolve => { resolveReady = resolve; });
+  const worker = {
+    state: 'installing',
+    listeners: new Map(),
+    addEventListener(name, callback) {
+      const callbacks = this.listeners.get(name) || [];
+      callbacks.push(callback);
+      this.listeners.set(name, callbacks);
+    },
+    emit(name) { for (const callback of this.listeners.get(name) || []) callback(); }
+  };
+  const serviceWorker = { controller: null, ready, register: async () => ({ installing: worker }) };
+  const g = game(390, 844, 7, { serviceWorker });
+
+  assert.equal(g.snapshot().started, false);
+  assert.equal(g.elements.start.disabled, true);
+  assert.equal(g.elements.start.textContent, 'Preparing…');
+  assert.equal(g.elements['welcome-prompt'].textContent, 'Preparing offline play…');
+
+  await Promise.resolve();
+  worker.state = 'activated';
+  worker.emit('statechange');
+  resolveReady({ active: worker });
+  assert.equal(g.elements.start.disabled, false);
+  assert.equal(g.elements.start.textContent, 'Tap to Play');
+  assert.equal(g.elements['welcome-prompt'].textContent, 'Touch the bubbles!');
+
+  g.elements.start.emit('click');
+  const started = g.step();
+  assert.equal(started.started, true);
+  assert.ok(started.bubbles.length > 0);
+});
+
+test('an incomplete first cache unlocks online play with a clear retry message', async () => {
+  const worker = {
+    state: 'installing',
+    listeners: new Map(),
+    addEventListener(name, callback) {
+      const callbacks = this.listeners.get(name) || [];
+      callbacks.push(callback);
+      this.listeners.set(name, callbacks);
+    },
+    emit(name) { for (const callback of this.listeners.get(name) || []) callback(); }
+  };
+  const serviceWorker = {
+    controller: null,
+    ready: new Promise(() => {}),
+    register: async () => ({ installing: worker })
+  };
+  const g = game(390, 844, 7, { serviceWorker });
+  await Promise.resolve();
+  worker.state = 'redundant';
+  worker.emit('statechange');
+
+  assert.equal(g.elements.start.disabled, false);
+  assert.match(g.elements['welcome-prompt'].textContent, /Keep online and reload/);
+  g.elements.start.emit('click');
+  assert.equal(g.step().started, true);
+});
 
 test('idle play fills once with gentle edge puffs and keeps every bubble available', () => {
   for (const [width, height] of [[320, 568], [390, 844], [844, 390], [1440, 900]]) {
@@ -154,6 +222,31 @@ test('settings and a hidden page pause movement and the puff schedule', () => {
   assert.notDeepEqual(g.snapshot().bubbles, hidden.bubbles);
 });
 
+test('right-corner caregiver settings and preferences persist through an offline reload', () => {
+  const storage = new Map();
+  const g = game(390, 844, 7, { storage });
+  g.elements.game.emit('pointerdown', { pointerId: 9, clientX: 380, clientY: 10 });
+  g.advance(1.1);
+  assert.equal(g.snapshot().settingsOpen, true);
+
+  g.elements['simple-effects'].checked = true;
+  g.elements['simple-effects'].emit('change');
+  g.elements['quiet-sounds'].checked = true;
+  g.elements['quiet-sounds'].emit('change');
+  assert.equal(storage.get('bubble-pop-simple-effects'), '1');
+  assert.equal(storage.get('bubble-pop-quiet-sounds'), '1');
+
+  const activeOfflineWorker = {
+    controller: {},
+    ready: Promise.resolve({ active: {} }),
+    register: async () => ({ installing: null })
+  };
+  const reopened = game(390, 844, 7, { storage, online: false, serviceWorker: activeOfflineWorker });
+  assert.equal(reopened.elements['simple-effects'].checked, true);
+  assert.equal(reopened.elements['quiet-sounds'].checked, true);
+  assert.equal(reopened.snapshot().simpleEffects, true);
+});
+
 test('rotation retains existing bubbles and continues bounded play', () => {
   const g = game();
   g.advance(.4);
@@ -166,3 +259,4 @@ test('rotation retains existing bubbles and continues bounded play', () => {
     for (const b of state.bubbles) assert.ok(b.y >= b.r && b.y <= state.height - b.r);
   }
 });
+

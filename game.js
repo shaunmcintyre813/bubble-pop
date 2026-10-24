@@ -3,6 +3,7 @@
   const canvas = document.querySelector('#game');
   const ctx = canvas.getContext('2d', { alpha: false });
   const welcome = document.querySelector('#welcome');
+  const welcomePrompt = document.querySelector('#welcome-prompt');
   const parentPanel = document.querySelector('#parent-panel');
   const startButton = document.querySelector('#start');
   const resumeButton = document.querySelector('#resume');
@@ -20,6 +21,13 @@
   let soundOutput = null;
   let settingsOpen = false;
   const parentPresses = new Map();
+  const hasServiceWorker = 'serviceWorker' in navigator && location.protocol.startsWith('http');
+  let offlinePreparationPending = hasServiceWorker && !navigator.serviceWorker.controller;
+  if (offlinePreparationPending) {
+    startButton.disabled = true;
+    startButton.textContent = 'Preparing…';
+    welcomePrompt.textContent = 'Preparing offline play…';
+  }
   const pentatonic = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51, 1567.98, 1760];
   const backdrop = document.createElement('canvas');
 
@@ -324,7 +332,7 @@
   }
 
   function begin() {
-    if (started) return;
+    if (started || startButton.disabled) return;
     simpleEffects = simpleEffectsInput.checked;
     started = true;
     ensureAudio();
@@ -362,6 +370,16 @@
     lastFrame = 0;
   }
   resumeButton.addEventListener('click', closeParentSettings);
+
+  function finishOfflinePreparation(ready) {
+    if (!offlinePreparationPending) return;
+    offlinePreparationPending = false;
+    startButton.disabled = false;
+    startButton.textContent = 'Tap to Play';
+    welcomePrompt.textContent = ready
+      ? 'Touch the bubbles!'
+      : 'Offline setup did not finish. Keep online and reload before offline play.';
+  }
 
   startButton.addEventListener('pointerdown', begin, { passive: true });
   startButton.addEventListener('click', begin);
@@ -424,14 +442,22 @@
   document.addEventListener('visibilitychange', () => { lastFrame = 0; });
   resize();
   requestAnimationFrame(frame);
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { scope: './' }).then(registration => {
+  if (hasServiceWorker) {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).then(registration => {
+      if (offlinePreparationPending) {
+        const installing = registration.installing;
+        installing?.addEventListener('statechange', () => {
+          if (installing.state === 'activated') finishOfflinePreparation(true);
+          else if (installing.state === 'redundant') finishOfflinePreparation(false);
+        });
+        navigator.serviceWorker.ready.then(() => finishOfflinePreparation(true));
+      }
       const checkForUpdate = () => {
         if (document.visibilityState === 'visible' && navigator.onLine) registration.update().catch(() => {});
       };
       document.addEventListener('visibilitychange', checkForUpdate);
       window.addEventListener('online', checkForUpdate);
-    }).catch(() => {}));
+    }).catch(() => finishOfflinePreparation(false));
   }
   if (new URLSearchParams(location.search).has('test')) {
     window.__bubblePopTest = { snapshot: () => ({ started, width, height, safe, target: targetCount(),
@@ -440,3 +466,4 @@
       puffId: nextPuffId, nextPuffIn, simpleEffects, popCount, effectTypes: effects.map(e => e.type) }), popAt, tapAt };
   }
 })();
+
